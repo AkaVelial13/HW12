@@ -1,4 +1,4 @@
-from models import AddressBook, Record
+from models import AddressBook, Record, Birthday, Name, Phone
 
 
 class CommandHandler:
@@ -12,7 +12,11 @@ class CommandHandler:
             'add': self.handle_contact_add,
             'change': self.handle_contact_change,
             'phone': self.handle_contact_get_by_name,
-            'show all': self.handle_contact_get_all
+            'birthday': self.handle_set_birthday,
+            'show all': self.handle_contact_get_all,
+            'search': self.handle_search_contacts,
+            'save': self.handle_save_address_book,
+            'load': self.handle_load_address_book
         }
 
     @staticmethod
@@ -41,26 +45,93 @@ class CommandHandler:
         return 'Good bye!'
 
     @input_error
+    def handle_save_address_book(self, command):
+        try:
+            filename = command[0]
+            message = self.address_book.save_address_book(filename, self.address_book.data)
+            return message
+        except IndexError:
+            return 'Please provide a filename'
+
+    @input_error
+    def handle_load_address_book(self, command):
+        try:
+            filename = command[0]
+            data, message = self.address_book.load_address_book(filename)
+            if data is not None:
+                return f'Address book "{filename}" loaded'
+            else:
+                return message
+        except IndexError:
+            return 'Please provide a filename'
+
+    @input_error
     def handle_contact_add(self, command):
-        name, phone = command
-        record = Record(name)
-        record.add_phone(phone)
-        self.address_book.add_record(record)
-        return f'Contact {name} added with phone number {phone}'
+        name, *phones = command
+        try:
+            Name.validate(name)
+            if not phones:
+                raise ValueError('At least one phone number must be provided')
+            for phone in phones:
+                Phone.validate(phone)
+
+            record = Record(name)
+            for phone in phones:
+                record.add_phone(phone)
+            self.address_book.add_record(record)
+
+            return f'Contact {name} added with phone numbers: {", ".join(phones)}'
+
+        except ValueError as ve:
+            return str(ve)
+
+    @input_error
+    def handle_set_birthday(self, command):
+        name, birthday = command
+        try:
+            Name.validate(name)
+            Birthday.validate(birthday)
+
+            record = self.address_book.find(name)
+            if not record:
+                return f'Contact {name} not found'
+
+            record.add_birthday(birthday)
+            return f'Birthday {birthday} added for contact {name}'
+
+        except ValueError as ve:
+            return str(ve)
 
     @input_error
     def handle_contact_change(self, command):
-        name, phone = command
-        record = self.address_book.find(name)
-        if record:
-            record.add_phone(phone)
-            return f'Phone number for {name} changed to {phone}'
-        else:
-            return f'Contact {name} not found'
+        name, *phones = command
+        try:
+            Name.validate(name)
+            if not phones:
+                raise ValueError('At least one phone number must be provided')
+            for phone in phones:
+                Phone.validate(phone)
+
+            record = self.address_book.find(name)
+            if not record:
+                return f'Contact {name} not found'
+
+            for phone in phones:
+                record.add_phone(phone)
+
+            return f'Phone number(s) for {name} changed to {", ".join(phones)}'
+
+        except ValueError as ve:
+            return str(ve)
 
     @input_error
     def handle_contact_get_by_name(self, command):
         name = command[0]
+        try:
+            Name.validate(name)
+        except ValueError as ve:
+            return str(ve)
+
         record = self.address_book.find(name)
         if record:
             return str(record)
@@ -71,8 +142,32 @@ class CommandHandler:
         if not self.address_book.data:
             return 'No contacts found'
 
-        result = '\n'.join(str(record) for record in self.address_book.data.values())
-        return f'   Name: Phone number\n{result}\n'
+        result = ''
+        for record in self.address_book.data.values():
+            birthday_info = ''
+            if record.birthday:
+                days_left = record.days_to_birthday()
+                birthday_info = f', Days until birthday: {days_left}'
+            result += str(record) + birthday_info + '\n'
+
+        return result
+
+    @input_error
+    def handle_search_contacts(self, command):
+        search_query = " ".join(command)
+        results = []
+        for record in self.address_book.data.values():
+            if search_query.lower() in record.name.value.lower():
+                results.append(str(record))
+            else:
+                for phone in record.phones:
+                    if search_query in phone.value:
+                        results.append(str(record))
+                        break
+        if results:
+            return '\n'.join(results)
+        else:
+            return 'No matching contacts found'
 
     def get_handler(self, command: str) -> tuple:
         user_command = command.lower().split()
